@@ -5,7 +5,6 @@ set -e
 # Script to compile and install calimero server + tool on an Orange Pi PC
 # armbian based systems or Raspberry Pi rasbian systems
 #  - installs a JDK
-#  - installs Maven
 # 
 # Michael Albert info@michlstechblog.info
 # 09.04.2018
@@ -70,7 +69,6 @@ export CALIMERO_SERVER_APP_DATA=/home/$CALIMERO_SERVER_USER/.calimero-server
 # KNX Server Name
 export KNX_SERVER_NAME="Calimero KNXnet/IP Server"
 # Branch to use 
-
 export GIT_BRANCH="master"
 export GIT_BRANCH_TOOLS="master"
 # Temp dir for extracting archives after building
@@ -237,7 +235,7 @@ apt-get -y update
 apt-get -y upgrade
 fi
 apt-get -y install setserial
-apt-get -y install git maven
+apt-get -y install git
 apt-get -y install build-essential cmake
 apt-get -y install automake autoconf libtool 
 apt-get -y install dirmngr 
@@ -293,25 +291,6 @@ export JAVA_LIB_PATH=$(java $CALIMERO_BUILD/GetLibraryPath.java)
 if [ ! -d $JAVA_LIB_PATH ]; then
 	mkdir -p $JAVA_LIB_PATH
 fi 
-
-
-# Install Maven
-MVN_VERSION=3.9.4
-
-wget -P /tmp/ https://archive.apache.org/dist/maven/maven-3/$MVN_VERSION/binaries/apache-maven-$MVN_VERSION-bin.tar.gz
-
-cd /opt && sudo tar -xzvf /tmp/apache-maven-$MVN_VERSION-bin.tar.gz
-
-cat > /etc/profile.d/maven.sh <<EOF
-export M2_HOME=/opt/apache-maven-$MVN_VERSION
-export PATH=\$M2_HOME/bin:\$PATH
-EOF
-
-cat > /root/.bashrc <<EOF
-export M2_HOME=/opt/apache-maven-$MVN_VERSION
-export PATH=\$M2_HOME/bin:\$PATH
-EOF
-
 
 ################################ User and group ###############################
 # New User $CALIMERO_SERVER_USER 
@@ -449,27 +428,11 @@ clone_update_repo calimero-core $GIT_BRANCH
 cd $CALIMERO_BUILD
 clone_update_repo calimero-device $GIT_BRANCH
 
-# calimero parent is required for serial-native mvn compile
-cd $CALIMERO_BUILD
-clone_update_repo calimero.parent $GIT_BRANCH
-mvn install
-
 # serial-native
 cd $CALIMERO_BUILD
 clone_update_repo serial-native $GIT_BRANCH
-# Set Java home
-xmlstarlet ed --inplace -N x=http://maven.apache.org/POM/4.0.0 -u 'x:project/x:properties/x:java.home' -v "$JAVA_HOME_PATH" pom.xml
-# Compile
-mvn clean nar:nar-compile -Denforcer.skip=true
-# cp ./target/nar/serial-native-2.3-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-# cp ./target/nar/serial-native-2.3-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-if [ $ARCH = "ARM" ]; then
-	#cp ./target/nar/serial-native-2.3-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-	cp ./target/nar/serial-native-*-arm-Linux-gpp-jni/lib/arm-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-elif [ $ARCH = "X64" ]; then
-	#cp ./target/nar/serial-native-2.3-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-	cp ./target/nar/serial-native-*-amd64-Linux-gpp-jni/lib/amd64-Linux-gpp/jni/libserialcom.so $JAVA_LIB_PATH
-fi
+./gradlew assemble
+cp ./build/lib/main/release/stripped/libserialcom.so $JAVA_LIB_PATH
 
 # calimero-rxtx
 cd $CALIMERO_BUILD
@@ -479,7 +442,6 @@ clone_update_repo calimero-rxtx $GIT_BRANCH
 cd $CALIMERO_BUILD
 clone_update_repo calimero-usb
 # ./gradlew build publishToMavenLocal
-
 
 # calimero-server
 cd $CALIMERO_BUILD
@@ -590,13 +552,6 @@ chmod +x $BIN_PATH/knxtools
 echo Copy config files
 # Copy config files
 cp $CALIMERO_BUILD/calimero-server/resources/server-config.xml $CALIMERO_CONFIG_PATH
-if [ -f $CALIMERO_BUILD/calimero-server/resources/properties.xml ]; then
-	cp $CALIMERO_BUILD/calimero-server/resources/properties.xml $CALIMERO_CONFIG_PATH
-else
-	# Make sure any old properties.xml file is gone
-	mv $CALIMERO_CONFIG_PATH/properties.xml $CALIMERO_CONFIG_PATH/properties.xml-$(date '+%Y%m%d-%H%M%S') || true
-fi
-
 
 ############################ Copy keyring file to app data directory #####################
 if [ $KEYRING ]; then
@@ -647,15 +602,12 @@ else
     echo No KNX Connection specified
     exit 5
 fi
-# Set properties.xml path
-xmlstarlet ed  --inplace -u "knxServer/propertyDefinitions/@ref" -v "$CALIMERO_CONFIG_PATH/properties.xml" $CALIMERO_CONFIG_PATH/server-config.xml
 # Replace serial device /dev/ttySx => $SERIAL_INTERFACE
 sed -e"s/\/dev\/ttyS[[:digit:]]/\/dev\/$SERIAL_INTERFACE/g" $CALIMERO_CONFIG_PATH/server-config.xml --in-place=.bak
 # Replace serial device /dev/ttyACMx => $SERIAL_INTERFACE
 sed -e"s/\/dev\/ttyACM[[:digit:]]/\/dev\/$SERIAL_INTERFACE/g" $CALIMERO_CONFIG_PATH/server-config.xml --in-place=.bak
 # Comment routing tag
 sed -e's/[^<^!^\-^\-]\s\{1,\}\(<routing.*<\/routing>\)/<!-- \1 -->/g' $CALIMERO_CONFIG_PATH/server-config.xml  --in-place=.bak
-# Add empty groupAddressFilter
 
 ######### Addresses assigned to KNXnet/IP Clients 
 # Remove existing
